@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.woff2 binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.pdf binary
+# Unified diff context lines intentionally contain a leading space.
+*.patch -whitespace

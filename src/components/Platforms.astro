@@ -1,0 +1,48 @@
+---
+import starpodConfig, { xiaoyuzhouUrl } from '../../starpod.config';
+import AppleIcon from 'starpod/src/assets/apple.svg?url';
+import OvercastIcon from 'starpod/src/assets/overcast.svg?url';
+import PocketCastsIcon from 'starpod/src/assets/pocket-casts.svg?url';
+import SpotifyIcon from 'starpod/src/assets/spotify.svg?url';
+import YouTubeIcon from 'starpod/src/assets/youtube.svg?url';
+import xiaoyuzhouIcon from '../img/xiaoyuzhou.webp';
+
+const { platforms } = starpodConfig;
+const links = [
+  { name: 'Spotify', href: platforms.spotify, icon: SpotifyIcon },
+  { name: 'Apple Podcasts', href: platforms.apple, icon: AppleIcon },
+  { name: 'Overcast', href: platforms.overcast, icon: OvercastIcon },
+  { name: 'Pocket Casts', href: platforms.pocketCasts, icon: PocketCastsIcon },
+  { name: 'YouTube', href: platforms.youtube, icon: YouTubeIcon }
+];
+---
+
+<h3 class="section-heading hidden pt-12 pb-6 lg:block">Listen</h3>
+
+<div class="mt-16 flex items-center justify-center gap-6 lg:mt-0 lg:justify-start">
+  {
+    links.map(({ name, href, icon }) => href && (
+      <a
+        class:list={['gradient-icon', name === 'YouTube' ? 'h-7 w-7' : 'h-6 w-6']}
+        href={href}
+        aria-label={name === 'YouTube' ? 'Watch on YouTube' : `Listen on ${name}`}
+        title={name}
+        style={{ maskImage: `url("${icon}")` }}
+      />
+    ))
+  }
+  <a
+    class="h-6 shrink-0"
+    href={xiaoyuzhouUrl}
+    aria-label="在小宇宙收听逐流随想"
+    title="小宇宙"
+  >
+    <img
+      src={xiaoyuzhouIcon.src}
+      width={Math.round(24 * xiaoyuzhouIcon.width / xiaoyuzhouIcon.height)}
+      height="24"
+      alt=""
+      class="h-6 w-auto"
+    />
+  </a>
+</div>

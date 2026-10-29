@@ -1,0 +1,535 @@
+diff --git a/src/components/Hosts.astro b/src/components/Hosts.astro
+index fe64fce22bc7fc783b6c64b03d1759677c0e78da..98a2426b696f241e38bf6b1237bbd298416d2b2f 100644
+--- a/src/components/Hosts.astro
++++ b/src/components/Hosts.astro
+@@ -8,7 +8,7 @@ import avatarLight from '../assets/avatar-light.png';
+ 
+ const { hosts } = starpodConfig;
+ const images = import.meta.glob<{ default: ImageMetadata }>(
+-  '/src/img/people/*.{jpeg,jpg,png}'
++  '/src/img/people/*.{jpeg,jpg,png,webp,avif}'
+ );
+ 
+ // Fall back to the packaged avatar when the site has not provided a photo in
+diff --git a/src/components/SearchDialog.tsx b/src/components/SearchDialog.tsx
+index 3df2b534dfb6d08e93328178c967910720f3e807..56ca4d140681d65a11abc5b9049c1b156041ea5f 100644
+--- a/src/components/SearchDialog.tsx
++++ b/src/components/SearchDialog.tsx
+@@ -11,14 +11,39 @@ export default function SearchDialog() {
+   const inputRef = useRef<HTMLInputElement>(null);
+   const resultsRef = useRef<HTMLDivElement>(null);
+ 
+-  // Load episodes on mount
+-  useEffect(() => {
+-    fetch('/api/episodes/search.json')
+-      .then((res) => res.json())
+-      .then((data) => setEpisodes(data))
+-      .catch(console.error);
++  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
++  const loaded = useRef(false);
++  const pending = useRef(false);
++
++  const loadEpisodes = useCallback(async () => {
++    if (loaded.current || pending.current) return;
++    pending.current = true;
++    setLoadState('loading');
++    try {
++      const response = await fetch('/api/episodes/search.json');
++      if (!response.ok) throw new Error(`Search request failed: ${response.status}`);
++      const data: unknown = await response.json();
++      if (!Array.isArray(data) || !data.every((item) =>
++        item && typeof item.id === 'string' && typeof item.title === 'string' &&
++        typeof item.description === 'string' && typeof item.episodeSlug === 'string' &&
++        (item.episodeNumber === undefined || typeof item.episodeNumber === 'string')
++      )) throw new Error('Invalid search index');
++      setEpisodes(data as Episode[]);
++      loaded.current = true;
++      setLoadState('loaded');
++    } catch {
++      setLoadState('error');
++    } finally {
++      pending.current = false;
++    }
+   }, []);
+ 
++  // Keep the initial page free of search data requests. Successful loads are
++  // reused by this transition:persist dialog; failed loads can be retried.
++  useEffect(() => {
++    if (isSearchOpen.value) void loadEpisodes();
++  }, [isSearchOpen.value, loadEpisodes]);
++
+   // Filter episodes based on query
+   useEffect(() => {
+     if (!query.trim()) {
+@@ -154,7 +179,14 @@ export default function SearchDialog() {
+           class="max-h-80 overflow-y-auto p-2"
+           role="listbox"
+         >
+-          {filteredEpisodes.length === 0 ? (
++          {loadState === 'error' ? (
++            <div class="p-4 text-center" role="alert">
++              <p>搜索暂时不可用，请重试。</p>
++              <button type="button" class="btn mt-3" onClick={() => void loadEpisodes()}>重新加载</button>
++            </div>
++          ) : loadState !== 'loaded' ? (
++            <div class="p-4 text-center" role="status">正在加载节目…</div>
++          ) : filteredEpisodes.length === 0 ? (
+             <div class="p-4 text-center text-light-text-body dark:text-dark-text-body">
+               {query
+                 ? 'No episodes found'
+diff --git a/src/index.ts b/src/index.ts
+index 047bad145ba506d81aa3cccca416789685085b8d..4d4fa3e655f275d1d88e2e3eed134ffa34cd27f4 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -5,15 +5,10 @@ import preact from '@astrojs/preact';
+ import sitemap from '@astrojs/sitemap';
+ import tailwindcss from '@tailwindcss/vite';
+ import type { AstroIntegration } from 'astro';
+-import { fontProviders } from 'astro/config';
+ import type { Plugin as VitePlugin } from 'vite';
+ 
+ import rehypeTranscriptTimestamps from './lib/rehype-transcript-timestamps.mjs';
+ import { validateStarpodConfig, type StarpodConfig } from './utils/config';
+-import {
+-  main as applyVercelMarkdownNegotiation,
+-  pagesToMarkdownPaths
+-} from './vercel-md-negotiation.mjs';
+ 
+ /**
+  * Built-in components a site may replace via `options.components`. Each maps
+@@ -120,15 +115,13 @@ function starpodVitePlugin(
+ }
+ 
+ /**
+- * Every route the integration injects, mirroring the file-based routes the
+- * pages had when they lived in the consuming site's `src/pages`.
++ * Static routes only: Pages serves 404.html and contact links without a server.
+  */
+ const ROUTES: Array<{ pattern: string; entrypoint: string }> = [
+   { pattern: '/', entrypoint: 'index.astro' },
+   { pattern: '/index.html.md', entrypoint: 'index.html.md.ts' },
+   { pattern: '/contact.html.md', entrypoint: 'contact.html.md.ts' },
+   { pattern: '/404', entrypoint: '404.astro' },
+-  { pattern: '/[...notFound]', entrypoint: '[...notFound].astro' },
+   { pattern: '/[episode]', entrypoint: '[episode].astro' },
+   { pattern: '/[episode].html.md', entrypoint: '[episode].html.md.ts' },
+   { pattern: '/about', entrypoint: 'about.astro' },
+@@ -143,7 +136,6 @@ const ROUTES: Array<{ pattern: string; entrypoint: string }> = [
+   { pattern: '/llms.txt', entrypoint: 'llms.txt.ts' },
+   { pattern: '/openapi.json', entrypoint: 'openapi.json.ts' },
+   { pattern: '/robots.txt', entrypoint: 'robots.txt.ts' },
+-  { pattern: '/api/contact', entrypoint: 'api/contact.ts' },
+   { pattern: '/api/episodes/[page].json', entrypoint: 'api/episodes/[page].json.ts' },
+   {
+     pattern: '/api/episodes/search.json',
+@@ -186,14 +178,11 @@ export default function starpod(
+   // Validated here too so configs that skipped defineStarpodConfig still
+   // get checked.
+   const starpodConfig = validateStarpodConfig(config);
+-  let projectRoot: URL;
+ 
+   return {
+     name: 'starpod',
+     hooks: {
+       'astro:config:setup': ({ config, injectRoute, updateConfig }) => {
+-        projectRoot = config.root;
+-
+         for (const route of ROUTES) {
+           injectRoute({
+             pattern: route.pattern,
+@@ -208,24 +197,6 @@ export default function starpod(
+           experimental: {
+             clientPrerender: true
+           },
+-          fonts: [
+-            {
+-              provider: fontProviders.google(),
+-              name: 'Inter',
+-              cssVariable: '--astro-font-inter',
+-              formats: ['woff2'],
+-              styles: ['normal'],
+-              subsets: ['latin'],
+-              weights: ['300 900'],
+-              options: {
+-                experimental: {
+-                  variableAxis: {
+-                    opsz: ['14..32']
+-                  }
+-                }
+-              }
+-            }
+-          ],
+           image: {
+             remotePatterns: [{ protocol: 'https' }, { protocol: 'http' }]
+           },
+@@ -262,22 +233,6 @@ export default function starpod(
+             ]
+           }
+         });
+-      },
+-      'astro:build:done': ({ dir, assets }) => {
+-        // Injects `Accept: text/markdown` content-negotiation routes into the
+-        // Vercel build output. No-ops for other adapters. The adapter runs
+-        // first in astro:build:done (Astro unshifts it), so config.json exists
+-        // here — but the static dir is only copied afterwards, so the markdown
+-        // twin paths are derived from the build's generated assets, not the
+-        // filesystem.
+-        const outputBase = fileURLToPath(dir);
+-        const generated = [...assets.values()]
+-          .flat()
+-          .map((url) => fileURLToPath(url).slice(outputBase.length));
+-        applyVercelMarkdownNegotiation(
+-          fileURLToPath(new URL('./.vercel/output', projectRoot)),
+-          pagesToMarkdownPaths(generated)
+-        );
+       }
+     }
+   };
+diff --git a/src/layouts/Layout.astro b/src/layouts/Layout.astro
+index 8dae2c6400bc499c14ad39d1a1ea50202fdab722..44a65c99d9de24141555d4f023f7ea34ef746332 100644
+--- a/src/layouts/Layout.astro
++++ b/src/layouts/Layout.astro
+@@ -3,7 +3,6 @@ import { Font } from 'astro:assets';
+ import { ClientRouter } from 'astro:transitions';
+ import { Schema } from 'astro-seo-schema';
+ 
+-import SpeedInsights from '@vercel/speed-insights/astro';
+ import { getPublicationAtUri } from '@bryanguffey/astro-standard-site';
+ 
+ import Breadcrumbs from 'virtual:starpod/components/Breadcrumbs';
+@@ -79,10 +78,7 @@ const publicationLinkTag =
+     }
+ 
+     <!-- Favicons -->
+-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+-    <link rel="manifest" href="/site.webmanifest" />
++    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+     <meta
+       name="theme-color"
+       content="#ffffff"
+@@ -113,7 +109,7 @@ const publicationLinkTag =
+ 
+     <link rel="preload" as="image" href={show.image} />
+ 
+-    <Font cssVariable="--astro-font-inter" preload />
++    <Font cssVariable="--astro-font-misans" />
+ 
+     <Schema
+       slot="head"
+@@ -145,7 +141,7 @@ const publicationLinkTag =
+     <ClientRouter />
+   </head>
+   <body
+-    class="font-inter text-light-text-body dark:bg-dark-background dark:text-dark-text-body antialiased"
++    class="font-sans text-light-text-body dark:bg-dark-background dark:text-dark-text-body antialiased"
+   >
+     <header
+       class="custom-scrollbar lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-112 lg:items-start lg:overflow-y-auto xl:w-120"
+@@ -220,6 +216,5 @@ const publicationLinkTag =
+       <Player client:only="preact" transition:persist="player" />
+     </div>
+     <SearchDialog client:load transition:persist="search-dialog" />
+-    <SpeedInsights />
+   </body>
+ </html>
+diff --git a/src/lib/llms.ts b/src/lib/llms.ts
+index d7fb7ef4080723c122e282cdc42f8efa818beab4..32798528ccb9cc42e721b41a4f4c02e1e927e26f 100644
+--- a/src/lib/llms.ts
++++ b/src/lib/llms.ts
+@@ -86,7 +86,7 @@ export function generateWhenToUseSection(show: Show, siteUrl?: URL): string {
+   content += `- Answer questions about the show itself: hosts, format, topics covered, and how to subscribe\n\n`;
+   content += `Do not use this site for topics unrelated to ${show.title} or its episodes.\n\n`;
+   content += `How to fetch content:\n\n`;
+-  content += `- Every content page has a markdown twin at \`{path}.html.md\` (for example \`${baseUrl}/about.html.md\`), or request any page with an \`Accept: text/markdown\` header\n`;
++  content += `- Every content page has a static markdown twin at \`{path}.html.md\` (for example \`${baseUrl}/about.html.md\`); use \`${baseUrl}/index.html.md\` for the homepage\n`;
+   content += `- Start from [llms.txt](${baseUrl}/llms.txt) or the [Episodes Index](${baseUrl}/episodes-index.html.md)\n`;
+   content += `- Structured JSON endpoints are described in the [OpenAPI specification](${baseUrl}/openapi.json)\n\n`;
+ 
+@@ -371,8 +371,7 @@ export function generateAboutMarkdown(
+ }
+ 
+ /**
+- * Generate homepage markdown content, served at /index.html.md and via
+- * `Accept: text/markdown` negotiation on /.
++ * Generate static homepage markdown content, served at /index.html.md.
+  */
+ export function generateHomeMarkdown(
+   show: Show,
+@@ -427,8 +426,7 @@ export function generateHomeMarkdown(
+ }
+ 
+ /**
+- * Generate contact page markdown content, served at /contact.html.md and via
+- * `Accept: text/markdown` negotiation on /contact.
++ * Generate static contact page markdown content, served at /contact.html.md.
+  */
+ export function generateContactMarkdown(
+   show: Show,
+@@ -439,15 +437,14 @@ export function generateContactMarkdown(
+ 
+   let markdown = `# Contact ${show.title}\n\n`;
+   markdown += `Have a question, a topic suggestion, or feedback for the show? `;
+-  markdown += `The fastest way to reach us is the contact form at [${baseUrl}/contact](${baseUrl}/contact). `;
+-  markdown += `Messages go straight to the hosts and we read every one.\n\n`;
+-
+-  markdown += `Programmatic access: send a POST request to \`${baseUrl}/api/contact\` `;
+-  markdown += `with form fields \`name\`, \`email\`, and \`message\` `;
+-  markdown += `(see the [OpenAPI specification](${baseUrl}/openapi.json) for details).\n\n`;
+-
+-  markdown += `## Reach the Hosts Directly\n\n`;
+-  for (const host of config.hosts) {
++  markdown += `Find the show on the listening platforms below or use the hosts' public links. `;
++  markdown += `See [Contact and subscribe](${baseUrl}/contact) for the same links.\n\n`;
++
++  const hostsWithLinks = config.hosts.filter(
++    (host) => host.twitter || host.github || host.website
++  );
++  if (hostsWithLinks.length > 0) markdown += `## Reach the Hosts Directly\n\n`;
++  for (const host of hostsWithLinks) {
+     markdown += `### ${host.name}\n\n`;
+     if (host.twitter) markdown += `- Twitter: ${host.twitter}\n`;
+     if (host.github) markdown += `- GitHub: ${host.github}\n`;
+diff --git a/src/lib/openapi.ts b/src/lib/openapi.ts
+index 51e8935c7e14a9ffb6524e1f1c15c260e8b8efd8..96718245ec62e48083f19e118ad7dc819e14fb06 100644
+--- a/src/lib/openapi.ts
++++ b/src/lib/openapi.ts
+@@ -20,7 +20,7 @@ export function generateOpenApiSpec(
+       description:
+         `Public API and machine-readable content endpoints for ${show.title}. ` +
+         `${config.blurb} ` +
+-        `Content pages also serve markdown via the Accept header (Accept: text/markdown) or at their .html.md twin URL. ` +
++        `Content pages have static markdown twins at their .html.md URL. ` +
+         `See ${baseUrl}/llms.txt for a structured overview of all resources.`,
+       version: '1.0.0',
+       contact: {
+@@ -92,70 +92,9 @@ export function generateOpenApiSpec(
+               }
+             },
+             '404': {
+-              description: 'Page number out of range',
++              description: 'Page number out of range; the static host serves its HTML 404 page',
+               content: {
+-                'application/json': {
+-                  schema: { $ref: '#/components/schemas/Error' }
+-                }
+-              }
+-            }
+-          }
+-        }
+-      },
+-      '/api/contact': {
+-        post: {
+-          operationId: 'sendContactMessage',
+-          summary: 'Send a message to the show',
+-          requestBody: {
+-            required: true,
+-            content: {
+-              'multipart/form-data': {
+-                schema: {
+-                  type: 'object',
+-                  required: ['name', 'email', 'message'],
+-                  properties: {
+-                    name: { type: 'string' },
+-                    email: { type: 'string', format: 'email' },
+-                    message: { type: 'string' }
+-                  }
+-                }
+-              }
+-            }
+-          },
+-          responses: {
+-            '200': {
+-              description: 'Message delivered',
+-              content: {
+-                'application/json': {
+-                  schema: {
+-                    type: 'object',
+-                    properties: { message: { type: 'string' } }
+-                  }
+-                }
+-              }
+-            },
+-            '400': {
+-              description: 'Missing or invalid fields',
+-              content: {
+-                'application/json': {
+-                  schema: { $ref: '#/components/schemas/Error' }
+-                }
+-              }
+-            },
+-            '405': {
+-              description: 'Method not allowed (only POST is supported)',
+-              content: {
+-                'application/json': {
+-                  schema: { $ref: '#/components/schemas/Error' }
+-                }
+-              }
+-            },
+-            '502': {
+-              description: 'Message could not be delivered upstream',
+-              content: {
+-                'application/json': {
+-                  schema: { $ref: '#/components/schemas/Error' }
+-                }
++                'text/html': { schema: { type: 'string' } }
+               }
+             }
+           }
+diff --git a/src/lib/rss.ts b/src/lib/rss.ts
+index 91670ce4e1296dabb20d075b6da545a05a5eb534..313235b3a2641792aad0454708346c1e15636baa 100644
+--- a/src/lib/rss.ts
++++ b/src/lib/rss.ts
+@@ -6,7 +6,10 @@ import {
+   object,
+   optional,
+   parse,
++  pipe,
++  regex,
+   string,
++  transform,
+   union
+ } from 'valibot';
+ 
+@@ -122,7 +125,9 @@ export async function getAllEpisodes(config?: StarpodConfig) {
+   let FeedSchema = object({
+     items: array(
+       object({
+-        id: string(),
++        // rss-to-json omits id when an RSS guid has no XML attributes.
++        id: optional(string()),
++        link: optional(string()),
+         title: string(),
+         published: number(),
+         description: string(),
+@@ -130,7 +135,16 @@ export async function getAllEpisodes(config?: StarpodConfig) {
+         podcast_transcript: optional(
+           union([TranscriptSchema, array(TranscriptSchema)])
+         ),
+-        itunes_duration: number(),
++        itunes_duration: union([
++          number(),
++          pipe(
++            string(),
++            regex(/^\d+(?::[0-5]\d){0,2}$/),
++            transform((duration) =>
++              duration.split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0)
++            )
++          )
++        ]),
+         itunes_episode: optional(number()),
+         itunes_episodeType: string(),
+         itunes_image: optional(object({ href: optional(string()) })),
+@@ -157,6 +171,7 @@ export async function getAllEpisodes(config?: StarpodConfig) {
+           description,
+           content_encoded,
+           id,
++          link,
+           title,
+           enclosures,
+           published,
+@@ -177,7 +192,7 @@ export async function getAllEpisodes(config?: StarpodConfig) {
+             ) ?? enclosures[0];
+ 
+           return {
+-            id,
++            id: id ?? link ?? episodeSlug,
+             title: `${title}`,
+             content: episodeContent,
+             description: truncate(htmlToText(description), 260),
+diff --git a/src/pages/about.astro b/src/pages/about.astro
+index 32356e131a85f2ade3740c67d037b18b81fe1a61..4a4c174bd3fddb05358f2a25e69c9b592bc6f9fb 100644
+--- a/src/pages/about.astro
++++ b/src/pages/about.astro
+@@ -10,7 +10,7 @@ import avatarLight from '../assets/avatar-light.png';
+ 
+ const { hosts } = starpodConfig;
+ const images = import.meta.glob<{ default: ImageMetadata }>(
+-  '/src/img/people/*.{jpeg,jpg,png}'
++  '/src/img/people/*.{jpeg,jpg,png,webp,avif}'
+ );
+ 
+ // Fall back to the packaged avatar when the site has not provided a photo in
+diff --git a/src/pages/contact.astro b/src/pages/contact.astro
+index 37404e5fa0f277ed0d16106a04b2306c14e88b14..c1ad9ff00788db784fe451340f87027121d4b82e 100644
+--- a/src/pages/contact.astro
++++ b/src/pages/contact.astro
+@@ -1,21 +1,43 @@
+ ---
+ import Layout from '../layouts/Layout.astro';
+-import ContactForm from '../components/ContactForm';
++import LargePlatforms from 'virtual:starpod/components/LargePlatforms';
++import starpodConfig from 'virtual:starpod/config';
++
++const hostsWithLinks = starpodConfig.hosts.filter(
++  (host) => host.website || host.twitter || host.github
++);
+ ---
+ 
+-<Layout title="Contact">
++<Layout title="联系与订阅">
+   <div class="relative z-10 px-8 lg:px-18">
+     <h1
+       class="text-light-text-heading mb-4 text-2xl font-bold lg:mb-6 lg:text-5xl dark:text-white"
+     >
+-      Get in touch
++      联系与订阅
+     </h1>
+ 
+     <p class="mb-8">
+-      Have a question for us or a topic you would like us to cover on the show?
+-      Reach out here and we'll be in touch soon!
++      欢迎在你使用的播客平台收听、订阅和留言，分享你的想法或希望我们聊的话题。
+     </p>
+ 
+-    <ContactForm client:load />
++    <LargePlatforms />
++
++    {
++      hostsWithLinks.length > 0 && (
++        <section class="mt-12">
++          <h2 class="mb-6 text-xl font-bold">联系主播</h2>
++          {hostsWithLinks.map((host) => (
++            <div class="mb-6">
++              <h3 class="mb-3 font-bold">{host.name}</h3>
++              <ul class="flex flex-wrap gap-6">
++                {host.website && <li><a class="underline" href={host.website}>个人主页</a></li>}
++                {host.twitter && <li><a class="underline" href={host.twitter}>Twitter</a></li>}
++                {host.github && <li><a class="underline" href={host.github}>GitHub</a></li>}
++              </ul>
++            </div>
++          ))}
++        </section>
++      )
++    }
+   </div>
+ </Layout>
+diff --git a/src/pages/robots.txt.ts b/src/pages/robots.txt.ts
+index a7894f024988fec40d932a9fb1eae5e434c81a2b..21d5047586471587f25e6c2f4d8ab520e1ea4f6e 100644
+--- a/src/pages/robots.txt.ts
++++ b/src/pages/robots.txt.ts
+@@ -17,8 +17,8 @@ Sitemap: ${sitemapURL.href}
+ # - ${siteURL.origin}/[episode-slug].html.md - Individual episodes with transcripts
+ # - ${siteURL.origin}/openapi.json - OpenAPI spec for the JSON API endpoints
+ #
+-# Content pages also serve markdown via the Accept header
+-# (Accept: text/markdown) or at their .html.md twin URL.
++# Content pages have static markdown twins at their .html.md URL.
++# The homepage markdown is at ${siteURL.origin}/index.html.md.
+ # 
+ # All content includes:
+ # - Podcast metadata (hosts, description, platforms)
+diff --git a/src/styles/tailwind.css b/src/styles/tailwind.css
+index dcb265676192e28c16dd30cfc5b0d88d5496a3dd..2db8392568f8bba61225285d69580a4567344603 100644
+--- a/src/styles/tailwind.css
++++ b/src/styles/tailwind.css
+@@ -45,7 +45,7 @@
+   --color-light-text-body: oklch(59.68% 0.017 285.89);
+   --color-light-text-heading: oklch(30.55% 0.052 292.57);
+ 
+-  --font-inter: var(--astro-font-inter);
++  --font-sans: var(--astro-font-misans);
+ }
+ 
+ /*

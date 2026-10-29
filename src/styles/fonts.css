@@ -1,0 +1,15 @@
+/* Astro serves the local MiSans files with hashed URLs and font-display: swap. */
+body {
+  font-weight: 400;
+}
+
+/* Keep headings in MiSans Bold, including headings inside episode show notes. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--astro-font-misans);
+  font-weight: 700;
+}

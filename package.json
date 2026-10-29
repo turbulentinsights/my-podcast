@@ -1,0 +1,50 @@
+{
+  "name": "turbulent-insights",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "astro": "astro",
+    "build": "astro check && astro build && node scripts/optimize-build.mjs && node scripts/check-build.mjs",
+    "dev": "astro dev",
+    "preview": "astro preview",
+    "check": "astro check",
+    "check:build": "node scripts/check-build.mjs",
+    "test:build": "node --test scripts/test-build.mjs"
+  },
+  "dependencies": {
+    "@astrojs/preact": "^5.1.4",
+    "astro": "^6.4.2",
+    "preact": "^10.29.2",
+    "starpod": "1.1.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "fontkit": "^2.0.4",
+    "parse5": "^8.0.1",
+    "sharp": "^0.34.5",
+    "subset-font": "^2.9.0",
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-xml-parser": "4.5.4",
+      "starpod>@vercel/speed-insights": "-"
+    },
+    "onlyBuiltDependencies": [
+      "@tailwindcss/oxide",
+      "esbuild",
+      "sharp"
+    ],
+    "patchedDependencies": {
+      "starpod@1.1.0": "patches/starpod@1.1.0.patch"
+    }
+  },
+  "overrides": {
+    "fast-xml-parser": "4.5.4"
+  },
+  "engines": {
+    "node": ">=22.12.0 <23"
+  }
+}
