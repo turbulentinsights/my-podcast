@@ -7,7 +7,7 @@ export const xiaoyuzhouUrl =
 export default defineStarpodConfig({
   blurb: '一档不很轻松的闲谈节目。闲谈也是出路。',
   description:
-    '一档不很轻松的闲谈节目。闲谈也是出路。',
+    '一档不很轻松的闲谈节目。闲谈也是出路。\n 本网站使用 Astro 模板 https://github.com/shipshapecode/starpod 构建，感谢小米公司开源 MiSans 字体。',
   hosts: [
     {
       name: '阵雨',
